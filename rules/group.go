@@ -75,6 +75,8 @@ type Group struct {
 
 	// concurrencyController controls the rules evaluation concurrency.
 	concurrencyController RuleConcurrencyController
+	alertStoreFunc        AlertStateStoreFunc
+	alertStore            AlertStore
 }
 
 // GroupEvalIterationFunc is used to implement and extend rule group
@@ -94,6 +96,8 @@ type GroupOptions struct {
 	QueryOffset       *time.Duration
 	done              chan struct{}
 	EvalIterationFunc GroupEvalIterationFunc
+	AlertStoreFunc    AlertStateStoreFunc
+	AlertStore        AlertStore
 }
 
 // NewGroup makes a new Group with the given name, options, and rules.
@@ -119,6 +123,12 @@ func NewGroup(o GroupOptions) *Group {
 		evalIterationFunc = DefaultEvalIterationFunc
 	}
 
+	alertStoreFunc := o.AlertStoreFunc
+	//var alertStore *AlertStore
+	if alertStoreFunc == nil {
+		alertStoreFunc = DefaultAlertStoreFunc
+	}
+
 	concurrencyController := o.Opts.RuleConcurrencyController
 	if concurrencyController == nil {
 		concurrencyController = sequentialRuleEvalController{}
@@ -140,6 +150,8 @@ func NewGroup(o GroupOptions) *Group {
 		logger:                log.With(o.Opts.Logger, "file", o.File, "group", o.Name),
 		metrics:               metrics,
 		evalIterationFunc:     evalIterationFunc,
+		alertStoreFunc:        alertStoreFunc,
+		alertStore:            o.AlertStore,
 		concurrencyController: concurrencyController,
 	}
 }
@@ -478,6 +490,16 @@ func (g *Group) Eval(ctx context.Context, ts time.Time) {
 
 			g.metrics.EvalTotal.WithLabelValues(GroupKey(g.File(), g.Name())).Inc()
 
+			if g.lastEvalTimestamp.IsZero() || g.shouldRestore {
+				if ar, ok := rule.(*AlertingRule); ok {
+					restoredAlerts := g.alertStore.GetAlerts(ar.GetAlertFingerprint())
+					if restoredAlerts != nil {
+						ar.SetActiveAlerts(restoredAlerts)
+						level.Info(g.logger).Log("msg", "Restored alerts from file", "restoredAlerts", len(restoredAlerts), "rule", rule.String(), "length of active alerts", len(ar.active), "ar.active", ar.active)
+					}
+				}
+			}
+
 			vector, err := rule.Eval(ctx, ruleQueryOffset, ts, g.opts.QueryFunc, g.opts.ExternalURL, g.Limit())
 			if err != nil {
 				rule.SetHealth(HealthBad)
@@ -599,6 +621,8 @@ func (g *Group) Eval(ctx context.Context, ts time.Time) {
 			eval(i, rule, nil)
 		}
 	}
+
+	g.alertStoreFunc(g)
 
 	wg.Wait()
 
