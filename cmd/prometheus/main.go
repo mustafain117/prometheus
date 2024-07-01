@@ -772,7 +772,7 @@ func main() {
 		}
 
 		queryEngine = promql.NewEngine(opts)
-
+		alertstore := rules.NewAlertStore(ctxRule, log.With(logger, "component", "alertstore"), make(chan *rules.State, 1000))
 		ruleManager = rules.NewManager(&rules.ManagerOptions{
 			Appendable:             fanoutStorage,
 			Queryable:              localStorage,
@@ -790,6 +790,7 @@ func main() {
 			DefaultRuleQueryOffset: func() time.Duration {
 				return time.Duration(cfgFile.GlobalConfig.RuleQueryOffset)
 			},
+			AlertStore: alertstore,
 		})
 	}
 
@@ -925,6 +926,7 @@ func main() {
 					files,
 					cfg.GlobalConfig.ExternalLabels,
 					externalURL,
+					nil,
 					nil,
 				)
 			},
