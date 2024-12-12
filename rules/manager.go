@@ -135,7 +135,6 @@ type ManagerOptions struct {
 	RestoreNewRuleGroups bool
 
 	Metrics *Metrics
-	
 }
 
 // NewManager returns an implementation of Manager, ready to be started
